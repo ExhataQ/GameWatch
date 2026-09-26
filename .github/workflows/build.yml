@@ -1,0 +1,31 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    # This is the key line: it runs on an actual Windows VM that GitHub
+    # provides for free, not a Linux container - so this is real proof the
+    # WPF app compiles, not just a syntax guess.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore GameWatch/GameWatch.csproj GameWatch.Tests/GameWatch.Tests.csproj
+
+      - name: Build app
+        run: dotnet build GameWatch/GameWatch.csproj --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test GameWatch.Tests/GameWatch.Tests.csproj --configuration Release --no-restore

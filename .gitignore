@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / other IDEs
+.idea/
+*.DotSettings.user
+
+# OS files
+.DS_Store
+Thumbs.db
