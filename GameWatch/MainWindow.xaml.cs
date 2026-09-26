@@ -10,8 +10,12 @@ public partial class MainWindow : Window
     private readonly NetworkStatsService _netService = new();
     private readonly ConnectionsService _connectionsService = new();
     private readonly GameModeController _gameMode = new();
+    private readonly EtwNetworkMonitor _etwMonitor = new();
     private readonly DispatcherTimer _timer;
     private NetworkSample? _previous;
+
+    private Dictionary<int, (long Sent, long Received)> _prevEtwSnapshot = new();
+    private DateTime _prevEtwSampleTime = DateTime.Now;
 
     public MainWindow()
     {
@@ -20,6 +24,22 @@ public partial class MainWindow : Window
         // Take a baseline sample immediately so the very first tick
         // already has something to diff against.
         _previous = _netService.GetSample();
+
+        bool etwStarted = _etwMonitor.Start();
+        EtwStatusText.Text = etwStarted
+            ? "Per-app rates: tracking (ETW)"
+            : $"Per-app rates unavailable: {_etwMonitor.LastError ?? "unknown error"} - try running as Administrator";
+        EtwStatusText.Foreground = etwStarted ? Brushes.MediumSeaGreen : Brushes.OrangeRed;
+        _prevEtwSampleTime = DateTime.Now;
+
+        // Make sure the kernel trace session and any suspended
+        // processes/services never get left in a bad state.
+        this.Closing += (_, _) =>
+        {
+            _timer.Stop();
+            _etwMonitor.Dispose();
+            if (_gameMode.IsOn) _gameMode.Disable();
+        };
 
         // DispatcherTimer runs on the UI thread automatically - unlike a
         // background loop, we don't need to worry about cross-thread UI
@@ -55,7 +75,40 @@ public partial class MainWindow : Window
         // Each row's checkbox reflects whether that process name is
         // currently in the Game Mode target list, so state survives the
         // rebuild even though these are brand-new objects every time.
-        var rows = _connectionsService.GetTopProcessesByConnectionCount(_gameMode.ProcessNames);
+        var rows = _connectionsService.GetTopProcessesByConnectionCount(_gameMode.ProcessNames, top: 30);
+
+        if (_etwMonitor.IsRunning)
+        {
+            var etwNow = _etwMonitor.Snapshot();
+            var etwNowTime = DateTime.Now;
+            var elapsed = (etwNowTime - _prevEtwSampleTime).TotalSeconds;
+            if (elapsed <= 0) elapsed = 2;
+
+            foreach (var row in rows)
+            {
+                if (etwNow.TryGetValue(row.Pid, out var cur))
+                {
+                    if (_prevEtwSnapshot.TryGetValue(row.Pid, out var prev))
+                    {
+                        var downBps = Math.Max(0, (cur.Received - prev.Received) / elapsed);
+                        var upBps = Math.Max(0, (cur.Sent - prev.Sent) / elapsed);
+                        row.DownloadRate = RateFormatting.FormatRate(downBps);
+                        row.UploadRate = RateFormatting.FormatRate(upBps);
+                    }
+                    else
+                    {
+                        row.DownloadRate = "…";
+                        row.UploadRate = "…";
+                    }
+                }
+            }
+
+            _prevEtwSnapshot = etwNow;
+            _prevEtwSampleTime = etwNowTime;
+        }
+
+        // Only sort by connections here since we don't have a top-N cutoff
+        // tied to bandwidth yet - keeps the busiest talkers visible.
         ConnectionsGrid.ItemsSource = rows;
     }
 

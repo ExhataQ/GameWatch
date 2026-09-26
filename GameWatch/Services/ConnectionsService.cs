@@ -9,6 +9,12 @@ public class ProcessConnectionInfo
     public int ConnectionCount { get; init; }
     public string ExePath { get; init; } = "";
     public bool IsTracked { get; init; }
+
+    // Filled in separately from ConnectionsService, by merging in an
+    // EtwNetworkMonitor snapshot delta - kept mutable (not init) since
+    // it's set after construction rather than from netstat data.
+    public string DownloadRate { get; set; } = "-";
+    public string UploadRate { get; set; } = "-";
 }
 
 // Uses netstat.exe rather than hand-rolled P/Invoke against

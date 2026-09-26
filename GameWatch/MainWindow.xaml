@@ -45,7 +45,8 @@
             <RowDefinition Height="20"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="16"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
@@ -66,10 +67,13 @@
                 Margin="0,10,0,0" Padding="12,6" HorizontalAlignment="Left"
                 Click="GameModeButton_Click"/>
 
-        <TextBlock Grid.Row="8" Text="CONNECTIONS BY PROCESS  -  check a row to suspend it in Game Mode"
+        <TextBlock Grid.Row="7" x:Name="EtwStatusText" Text="Per-app rates: starting..."
+                   Margin="0,6,0,0" Foreground="#888888" FontSize="12"/>
+
+        <TextBlock Grid.Row="9" Text="CONNECTIONS BY PROCESS  -  check a row to suspend it in Game Mode"
                    FontSize="14" Foreground="#4fc3f7" FontWeight="Bold"/>
 
-        <DataGrid Grid.Row="9" x:Name="ConnectionsGrid" Margin="0,8,0,0" IsReadOnly="False">
+        <DataGrid Grid.Row="10" x:Name="ConnectionsGrid" Margin="0,8,0,0" IsReadOnly="False">
             <DataGrid.Columns>
                 <DataGridTemplateColumn Header="Track" Width="50">
                     <DataGridTemplateColumn.CellTemplate>
@@ -81,9 +85,11 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Process" Binding="{Binding ProcessName}" Width="140" IsReadOnly="True"/>
-                <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="60" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Conns" Binding="{Binding ConnectionCount}" Width="60" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Process" Binding="{Binding ProcessName}" Width="120" IsReadOnly="True"/>
+                <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="55" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Conns" Binding="{Binding ConnectionCount}" Width="55" IsReadOnly="True"/>
+                <DataGridTextColumn Header="↓ Rate" Binding="{Binding DownloadRate}" Width="90" IsReadOnly="True"/>
+                <DataGridTextColumn Header="↑ Rate" Binding="{Binding UploadRate}" Width="90" IsReadOnly="True"/>
                 <DataGridTextColumn Header="File Location" Binding="{Binding ExePath}" Width="*" IsReadOnly="True"/>
             </DataGrid.Columns>
         </DataGrid>

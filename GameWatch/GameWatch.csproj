@@ -8,12 +8,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>GameWatch</AssemblyName>
     <RootNamespace>GameWatch</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Official Microsoft package. Restores automatically the first time
-         you build (needs internet once); no other external code. -->
+    <!-- Official Microsoft packages. Restore automatically the first time
+         you build (needs internet once); no other external code.
+         TraceEvent is the same library PerfView/dotnet-trace use to
+         consume ETW - it does the low-level event decoding for us. -->
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.*" />
   </ItemGroup>
 
 </Project>
