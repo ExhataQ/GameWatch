@@ -16,3 +16,6 @@ obj/
 # OS files
 .DS_Store
 Thumbs.db
+
+GameWatch_bundle.zip
+_bundle_staging/

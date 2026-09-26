@@ -32,6 +32,12 @@ public partial class MainWindow : Window
         EtwStatusText.Foreground = etwStarted ? Brushes.MediumSeaGreen : Brushes.OrangeRed;
         _prevEtwSampleTime = DateTime.Now;
 
+        // DispatcherTimer runs on the UI thread automatically - unlike a
+        // background loop, we don't need to worry about cross-thread UI
+        // updates here.
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _timer.Tick += Timer_Tick;
+
         // Make sure the kernel trace session and any suspended
         // processes/services never get left in a bad state.
         this.Closing += (_, _) =>
@@ -41,11 +47,6 @@ public partial class MainWindow : Window
             if (_gameMode.IsOn) _gameMode.Disable();
         };
 
-        // DispatcherTimer runs on the UI thread automatically - unlike a
-        // background loop, we don't need to worry about cross-thread UI
-        // updates here.
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        _timer.Tick += Timer_Tick;
         _timer.Start();
     }
 

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
 
@@ -35,20 +36,13 @@ public class EtwNetworkMonitor : IDisposable
     {
         try
         {
-            // Clean up a session left over from a previous crashed/killed run.
-            try
-            {
-                if (TraceEventSession.GetActiveSessionNames().Contains(KernelTraceEventParser.KernelSessionName))
-                {
-                    TraceEventSession.Stop(KernelTraceEventParser.KernelSessionName);
-                }
-            }
-            catch
-            {
-                // Best-effort cleanup only - if this fails we still try to
-                // start below, which will surface a clearer error if the
-                // stale session is really the problem.
-            }
+            // Note: The previous "stale session cleanup" block was removed
+            // because GetActiveSessionNames() returns objects, not strings,
+            // in this version of TraceEvent, and the string comparison failed
+            // to compile. If a stale "NT Kernel Logger" session exists from a
+            // crash, clean it up manually with:
+            //     logman stop "NT Kernel Logger" -ets
+            // before launching the app.
 
             _session = new TraceEventSession(KernelTraceEventParser.KernelSessionName)
             {
