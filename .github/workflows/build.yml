@@ -2,9 +2,9 @@ name: Build and Test
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   build:
@@ -21,11 +21,13 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Restore
-        run: dotnet restore GameWatch/GameWatch.csproj GameWatch.Tests/GameWatch.Tests.csproj
-
+      # No separate restore step: `dotnet restore` only accepts a single
+      # project/solution path, so passing two here was invalid CLI usage
+      # and failed immediately. `dotnet build` and `dotnet test` each
+      # restore their own project automatically when --no-restore isn't
+      # passed, so this is simpler AND correct.
       - name: Build app
-        run: dotnet build GameWatch/GameWatch.csproj --configuration Release --no-restore
+        run: dotnet build GameWatch/GameWatch.csproj --configuration Release
 
       - name: Run tests
-        run: dotnet test GameWatch.Tests/GameWatch.Tests.csproj --configuration Release --no-restore
+        run: dotnet test GameWatch.Tests/GameWatch.Tests.csproj --configuration Release
