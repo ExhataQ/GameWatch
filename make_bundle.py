@@ -27,14 +27,20 @@ INCLUDE = [
     "GameWatch/App.xaml.cs",
     "GameWatch/MainWindow.xaml",
     "GameWatch/MainWindow.xaml.cs",
+    "GameWatch/ProcessRowViewModel.cs",
     "GameWatch/GameWatch.csproj",
     "GameWatch/app.manifest",
-    "GameWatch/Services/ConnectionsService.cs",
     "GameWatch/Services/EtwNetworkMonitor.cs",
     "GameWatch/Services/GameModeController.cs",
-    "GameWatch/Services/NetstatParser.cs",
+    "GameWatch/Services/GameModeStateStore.cs",
     "GameWatch/Services/NetworkStatsService.cs",
     "GameWatch/Services/RateFormatting.cs",
+    "GameWatch/Services/AppSettings.cs",
+    "GameWatch/Services/AdapterClassifier.cs",
+    "GameWatch/Services/NativeConnectionReader.cs",
+    "GameWatch/Services/ConnectionAggregator.cs",
+    "GameWatch/Services/TrafficHistory.cs",
+    "GameWatch/Services/NetworkMonitorEngine.cs",
     ".gitignore",
 ]
 
@@ -54,16 +60,23 @@ bandwidth-hogging processes and services.
 
 ## What it does
 
-- Overall up/down rates, summed across all active network adapters,
-  refreshed every 2 seconds.
+- Overall up/down rates (IPv4+IPv6 combined), plus a rolling ~60s graph,
+  summed across adapters matching the current adapter filter.
 - Per-process breakdown via ETW (Event Tracing for Windows) using the
-  `Microsoft.Diagnostics.Tracing.TraceEvent` library. Same low-level
-  mechanism Task Manager uses for its per-process network columns.
-- Connection list showing process, PID, TCP connection count, per-process
-  rates (if ETW is running), and the full path to the .exe.
+  `Microsoft.Diagnostics.Tracing.TraceEvent` library, covering both IPv4
+  and IPv6 traffic. Same low-level mechanism Task Manager uses for its
+  per-process network columns.
+- Connection list showing process, PID, unified TCP+UDP connection count,
+  per-process rates, and the full path to the .exe - sortable by column.
+  Connections come from the native TCP/UDP tables (no netstat.exe).
+- Configurable UI refresh rate (Low/Normal/Fast) and adapter filter
+  (Automatic/Ethernet/Wi-Fi/VPN-Virtual), independent of how often the
+  background engine actually samples.
 - Game Mode: check a process row, click "Enable Game Mode" to suspend
   those processes (via NtSuspendProcess) and stop a configurable list of
-  Windows services (BITS, DoSvc, wuauserv by default). Reversible.
+  Windows services (BITS, DoSvc, wuauserv by default). Reversible, and
+  crash-safe: if GameWatch is killed while Game Mode is on, the next
+  launch restores whatever it changed.
 
 ## Requirements
 
@@ -76,19 +89,25 @@ bandwidth-hogging processes and services.
 
     GameWatch/
     |-- App.xaml, App.xaml.cs               WPF application entry point
-    |-- MainWindow.xaml, MainWindow.xaml.cs UI + 2-second update loop
+    |-- MainWindow.xaml, MainWindow.xaml.cs UI - reads engine snapshots on its own timer
     |-- GameWatch.csproj                    Project file
     |-- app.manifest                        Requests admin elevation
     +-- Services/
-        |-- ConnectionsService.cs           Runs netstat, maps PIDs to processes
+        |-- NetworkMonitorEngine.cs         Background collection+aggregation, own timer
+        |-- NativeConnectionReader.cs       TCP/UDP tables via iphlpapi.dll (no netstat.exe)
+        |-- ConnectionAggregator.cs         Pure per-PID grouping of connections (testable)
         |-- EtwNetworkMonitor.cs            ETW kernel session, per-PID byte counters
+        |-- NetworkStatsService.cs          Total adapter byte counts, filtered
+        |-- AdapterClassifier.cs            Pure adapter categorization (testable)
+        |-- TrafficHistory.cs               Rolling traffic history buffer (testable)
         |-- GameModeController.cs           Suspend/resume processes, stop/start services
-        |-- NetstatParser.cs                Pure parsing of netstat output (testable)
-        |-- NetworkStatsService.cs          Total adapter byte counts
+        |-- GameModeStateStore.cs           Crash-safe persistence of Game Mode state
+        |-- AppSettings.cs                  Persisted user settings (JSON)
         +-- RateFormatting.cs               Byte/s to human-readable, level thresholds
 
     GameWatch.Tests/
-    +-- Unit tests for NetstatParser and RateFormatting
+    +-- Unit tests for RateFormatting, ConnectionAggregator, AdapterClassifier,
+        TrafficHistory, and GameModeStateStore
 
 ## Build and run
 
@@ -119,9 +138,12 @@ on first build.
 
 ## Known limitations
 
-- IPv6 traffic is not counted in the per-process breakdown (IPv4 only).
-- No live sort by bandwidth; the table is ordered by connection count.
 - Elevation required for full functionality (see Requirements).
+- Per-process history graphing isn't implemented yet - only the total
+  up/down history is graphed; the process table still shows live rates.
+- Game profiles, automatic game detection, bandwidth limiting/blocking,
+  diagnostic logging export, and the Tools section are not implemented -
+  deliberately deferred to a later phase per the original design notes.
 
 ## Bundle info
 

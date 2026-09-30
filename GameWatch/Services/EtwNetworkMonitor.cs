@@ -54,10 +54,16 @@ public class EtwNetworkMonitor : IDisposable
             _session.Source.Kernel.TcpIpRecv += data => Add(data.ProcessID, received: data.size);
             _session.Source.Kernel.UdpIpSend += data => Add(data.ProcessID, sent: data.size);
             _session.Source.Kernel.UdpIpRecv += data => Add(data.ProcessID, received: data.size);
-            // Note: IPv6 traffic isn't counted yet - deliberately left out
-            // of this first pass to reduce risk of a wrong event/property
-            // name blocking everything. Can add TcpIpSendIPV6 etc. once
-            // this base version is confirmed working.
+
+            // IPv6 counterparts of the same events, routed into the same
+            // per-PID counters as their IPv4 siblings. Per the "don't make
+            // users think about IPv4 vs IPv6" design goal, callers only
+            // ever see one unified byte count per process - the v4/v6
+            // split stays an internal implementation detail here.
+            _session.Source.Kernel.TcpIpSendIPV6 += data => Add(data.ProcessID, sent: data.size);
+            _session.Source.Kernel.TcpIpRecvIPV6 += data => Add(data.ProcessID, received: data.size);
+            _session.Source.Kernel.UdpIpSendIPV6 += data => Add(data.ProcessID, sent: data.size);
+            _session.Source.Kernel.UdpIpRecvIPV6 += data => Add(data.ProcessID, received: data.size);
 
             // Source.Process() blocks pumping events until Stop() is
             // called, so it must run off the UI thread.
