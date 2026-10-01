@@ -212,8 +212,7 @@ public class NetworkMonitorEngine : IDisposable
         }
         catch
         {
-            // Process may have exited between the connection snapshot and
-            // this lookup - keep the "Unknown (PID x)" fallback.
+            if (_etwMonitor.TryGetProcessName(pid, out var observedName)) name = observedName;
         }
 
         var info = (name, path);

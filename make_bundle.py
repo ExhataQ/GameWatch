@@ -16,7 +16,6 @@ import os
 import shutil
 import zipfile
 from pathlib import Path
-from datetime import datetime
 
 REPO_ROOT = Path(__file__).resolve().parent
 STAGING_DIR = REPO_ROOT / "_bundle_staging"
@@ -41,116 +40,28 @@ INCLUDE = [
     "GameWatch/Services/ConnectionAggregator.cs",
     "GameWatch/Services/TrafficHistory.cs",
     "GameWatch/Services/NetworkMonitorEngine.cs",
+    "GameWatch/Services/ProcessTrafficHistory.cs",
+    "GameWatch/Services/ProcessIconProvider.cs",
+    "GameWatch/Services/BitsTransferReader.cs",
+    "GameWatch/Services/ServiceProcessReader.cs",
+    "GameWatch/TransferDisplayRow.cs",
+    "GameWatch/Services/TimeRangeMapper.cs",
+    "GameWatch/Services/NativeOwnerModuleReader.cs",
+    "GameWatch/Services/ServiceConnectionGrouper.cs",
+    "README.md",
+    "make_bundle.py",
+    ".github/workflows/build.yml",
     ".gitignore",
 ]
 
 AUTO_GLOB_FOLDERS = [
+    "GameWatch",
     "GameWatch.Tests",
 ]
 
 EXCLUDE_DIRS = {"bin", "obj", ".git", ".vs", ".vscode", "node_modules"}
 
 
-README_CONTENT = """\
-# GameWatch
-
-A Windows desktop app (WPF, .NET 8) that shows live network activity,
-breaks it down by process, and offers a "Game Mode" that suspends
-bandwidth-hogging processes and services.
-
-## What it does
-
-- Overall up/down rates (IPv4+IPv6 combined), plus a rolling ~60s graph,
-  summed across adapters matching the current adapter filter.
-- Per-process breakdown via ETW (Event Tracing for Windows) using the
-  `Microsoft.Diagnostics.Tracing.TraceEvent` library, covering both IPv4
-  and IPv6 traffic. Same low-level mechanism Task Manager uses for its
-  per-process network columns.
-- Connection list showing process, PID, unified TCP+UDP connection count,
-  per-process rates, and the full path to the .exe - sortable by column.
-  Connections come from the native TCP/UDP tables (no netstat.exe).
-- Configurable UI refresh rate (Low/Normal/Fast) and adapter filter
-  (Automatic/Ethernet/Wi-Fi/VPN-Virtual), independent of how often the
-  background engine actually samples.
-- Game Mode: check a process row, click "Enable Game Mode" to suspend
-  those processes (via NtSuspendProcess) and stop a configurable list of
-  Windows services (BITS, DoSvc, wuauserv by default). Reversible, and
-  crash-safe: if GameWatch is killed while Game Mode is on, the next
-  launch restores whatever it changed.
-
-## Requirements
-
-- Windows 10/11
-- .NET 8 SDK to build (or .NET 8 Desktop Runtime to run a pre-built binary)
-- Administrator privileges for ETW per-process tracking and service control.
-  The app runs without admin, but per-app rates are unavailable.
-
-## Project layout
-
-    GameWatch/
-    |-- App.xaml, App.xaml.cs               WPF application entry point
-    |-- MainWindow.xaml, MainWindow.xaml.cs UI - reads engine snapshots on its own timer
-    |-- GameWatch.csproj                    Project file
-    |-- app.manifest                        Requests admin elevation
-    +-- Services/
-        |-- NetworkMonitorEngine.cs         Background collection+aggregation, own timer
-        |-- NativeConnectionReader.cs       TCP/UDP tables via iphlpapi.dll (no netstat.exe)
-        |-- ConnectionAggregator.cs         Pure per-PID grouping of connections (testable)
-        |-- EtwNetworkMonitor.cs            ETW kernel session, per-PID byte counters
-        |-- NetworkStatsService.cs          Total adapter byte counts, filtered
-        |-- AdapterClassifier.cs            Pure adapter categorization (testable)
-        |-- TrafficHistory.cs               Rolling traffic history buffer (testable)
-        |-- GameModeController.cs           Suspend/resume processes, stop/start services
-        |-- GameModeStateStore.cs           Crash-safe persistence of Game Mode state
-        |-- AppSettings.cs                  Persisted user settings (JSON)
-        +-- RateFormatting.cs               Byte/s to human-readable, level thresholds
-
-    GameWatch.Tests/
-    +-- Unit tests for RateFormatting, ConnectionAggregator, AdapterClassifier,
-        TrafficHistory, and GameModeStateStore
-
-## Build and run
-
-From the GameWatch/ folder:
-
-    dotnet build
-    bin/Debug/net8.0-windows/GameWatch.exe
-
-Or in one step:
-
-    dotnet run
-
-Run as Administrator for the ETW per-process feature to work.
-
-## Run tests
-
-From the repo root:
-
-    dotnet test
-
-## Dependencies
-
-- Microsoft.Diagnostics.Tracing.TraceEvent - ETW kernel session + event decoding
-- System.ServiceProcess.ServiceController - Start/stop Windows services for Game Mode
-
-Both are official Microsoft packages, restored automatically by NuGet
-on first build.
-
-## Known limitations
-
-- Elevation required for full functionality (see Requirements).
-- Per-process history graphing isn't implemented yet - only the total
-  up/down history is graphed; the process table still shows live rates.
-- Game profiles, automatic game detection, bandwidth limiting/blocking,
-  diagnostic logging export, and the Tools section are not implemented -
-  deliberately deferred to a later phase per the original design notes.
-
-## Bundle info
-
-- Contents: source files only (no bin/, obj/, .git/, or build output).
-- Everything here is sufficient to rebuild the project from scratch
-  given the .NET 8 SDK.
-"""
 
 
 def is_excluded(path: Path) -> bool:
@@ -198,10 +109,6 @@ def main():
         shutil.copy2(src, dst)
         print(f"  + {rel}")
 
-    readme = README_CONTENT + f"\n- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-    (STAGING_DIR / "README.md").write_text(readme, encoding="utf-8")
-    print("  + README.md (generated)")
-
     with zipfile.ZipFile(ZIP_PATH, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, _, filenames in os.walk(STAGING_DIR):
             for fname in filenames:
@@ -213,7 +120,7 @@ def main():
 
     size_kb = ZIP_PATH.stat().st_size / 1024
     print()
-    print(f"Done. {len(files) + 1} files bundled (including README).")
+    print(f"Done. {len(files)} files bundled (including README).")
     print(f"Output: {ZIP_PATH}")
     print(f"Size:   {size_kb:.1f} KB")
 

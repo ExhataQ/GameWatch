@@ -27,11 +27,9 @@ public partial class MainWindow : Window
 
     private bool _initializing = true;
     private bool _gameModeBusy;
-    private bool _followRecent = true;
-    private DateTime _rangeStart;
-    private DateTime _rangeEnd;
-    private DateTime _oldest;
-    private DateTime _newest;
+    private bool _downloadsBusy;
+    private DateTime _lastDownloadsRefresh = DateTime.MinValue;
+    private readonly TimeRangeMapper _range = new();
     private IReadOnlyList<TrafficInterval> _latestTransfers = Array.Empty<TrafficInterval>();
 
     public MainWindow()
@@ -124,11 +122,14 @@ public partial class MainWindow : Window
         EtwStatusText.Foreground = snap.EtwRunning ? Brushes.MediumSeaGreen : Brushes.OrangeRed;
 
         MergeRows(snap.Processes);
+        LiveEmptyText.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ConnectionCountText.Text = $"{snap.Processes.Sum(p => p.ConnectionCount)} active connections";
 
         DrawHistoryGraph(snap.History);
         UpdateTransferRange(snap);
         CheckBandwidthAlert(snap);
+        if (DownloadsTab.IsSelected && DateTime.Now - _lastDownloadsRefresh >= TimeSpan.FromSeconds(10))
+            _ = RefreshDownloadsAsync();
     }
 
     // Update existing rows in place, add new PIDs, drop vanished ones.
@@ -159,6 +160,35 @@ public partial class MainWindow : Window
                 _rowsByPid.Remove(_rows[i].Pid);
                 _rows.RemoveAt(i);
             }
+        }
+    }
+
+    private async void ConnectionsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ConnectionsGrid.SelectedItem is not ProcessRowViewModel row)
+        {
+            ServiceDetailsText.Text = "Select a process to inspect its connections.";
+            return;
+        }
+        var pid = row.Pid;
+        var hosted = row.Services;
+        ServiceDetailsText.Text = $"{row.ProcessName} (PID {pid}) · loading owner modules...";
+        try
+        {
+            var details = await Task.Run(() =>
+                (Modules: NativeOwnerModuleReader.ReadForPid(pid), Services: new ServiceProcessReader().ReadServicesForPid(pid)));
+            if (ConnectionsGrid.SelectedItem is not ProcessRowViewModel selected || selected.Pid != pid) return;
+            var groups = ServiceConnectionGrouper.Group(details.Modules, details.Services);
+            var fullServices = details.Services.Count == 0 ? hosted : string.Join(", ", details.Services.Select(service => service.DisplayName));
+            ServiceDetailsText.Text = $"Hosted services: {(string.IsNullOrEmpty(fullServices) ? "None detected" : fullServices)}\n" +
+                (groups.Count == 0 ? "No current endpoints." : string.Join("\n", groups.Select(group =>
+                    $"{group.Label} → {string.Join(", ", group.Endpoints)}"))) +
+                "\nOwner modules identify connections, not per-service byte totals. UDP remote endpoints are not exposed by the listener table.";
+        }
+        catch (Exception error)
+        {
+            if (ConnectionsGrid.SelectedItem is ProcessRowViewModel selected && selected.Pid == pid)
+                ServiceDetailsText.Text = $"Hosted services: {hosted}\nOwner module lookup unavailable: {error.Message}";
         }
     }
 
@@ -197,94 +227,106 @@ public partial class MainWindow : Window
             return;
         }
 
-        _oldest = _latestTransfers[0].Start;
-        _newest = _latestTransfers[^1].End;
-        if (_followRecent)
-        {
-            _rangeStart = _newest - TimeSpan.FromMinutes(5);
-            if (_rangeStart < _oldest) _rangeStart = _oldest;
-            _rangeEnd = _newest;
-        }
-        else
-        {
-            if (_rangeStart < _oldest) _rangeStart = _oldest;
-            if (_rangeEnd < _oldest) _rangeEnd = _oldest;
-        }
-        RenderRange();
+        var previousStart = _range.Start;
+        var previousEnd = _range.End;
+        _range.SetBounds(_latestTransfers[0].Start, _latestTransfers[^1].End);
+        DrawRangeSparkline();
+
+        // Only rebuild the results table when the selected window actually
+        // changed, so scrolling/sorting it isn't reset every sample.
+        RenderRange(rebuildRows: _range.Start != previousStart || _range.End != previousEnd || HistoryGrid.ItemsSource is null);
     }
 
     private double RangeWidth => Math.Max(1, RangeCanvas.ActualWidth - StartThumb.Width);
 
-    private double ToPosition(DateTime value) => _newest <= _oldest ? 0 :
-        Math.Clamp((value - _oldest).Ticks / (double)(_newest - _oldest).Ticks, 0, 1) * RangeWidth;
+    private void DrawRangeSparkline()
+    {
+        var buckets = new double[200];
+        foreach (var interval in _latestTransfers)
+        {
+            var index = Math.Clamp((int)(_range.ToPosition(interval.Start, 199) + 0.5), 0, 199);
+            var seconds = Math.Max(1, (interval.End - interval.Start).TotalSeconds);
+            buckets[index] += interval.Processes.Sum(process => (process.DownloadBytes + process.UploadBytes) / seconds);
+        }
+        var peak = Math.Max(1, buckets.Max());
+        RangeSparkline.Points = new PointCollection(Enumerable.Range(0, buckets.Length)
+            .Select(index => new Point(10 + index * RangeWidth / 199, 20 - 15 * buckets[index] / peak)));
+    }
 
-    private DateTime FromPosition(double position) => _oldest.AddTicks(
-        (long)(Math.Clamp(position / RangeWidth, 0, 1) * (_newest - _oldest).Ticks));
-
-    private void RenderRange()
+    private void RenderRange(bool rebuildRows = true)
     {
         if (RangeCanvas is null || _latestTransfers.Count == 0) return;
-        var left = ToPosition(_rangeStart);
-        var right = ToPosition(_rangeEnd);
+        var left = _range.ToPosition(_range.Start, RangeWidth);
+        var right = _range.ToPosition(_range.End, RangeWidth);
         RangeTrack.Width = RangeWidth + StartThumb.Width;
         Canvas.SetLeft(StartThumb, left);
         Canvas.SetLeft(EndThumb, right);
         Canvas.SetLeft(RangeSelection, left + StartThumb.Width / 2);
         RangeSelection.Width = Math.Max(0, right - left);
-        RangeText.Text = $"{_rangeStart:yyyy-MM-dd HH:mm:ss}  →  {_rangeEnd:yyyy-MM-dd HH:mm:ss}  (available: {_oldest:yyyy-MM-dd HH:mm:ss} – {_newest:yyyy-MM-dd HH:mm:ss})";
-        var rows = ProcessTrafficHistory.Summarize(_latestTransfers, _rangeStart, _rangeEnd);
+        RangeText.Text = $"Available: {_range.Oldest:yyyy-MM-dd HH:mm:ss} – {_range.Newest:yyyy-MM-dd HH:mm:ss}";
+        StartRangeLabel.Text = $"Start: {_range.Start:yyyy-MM-dd HH:mm:ss}";
+        EndRangeLabel.Text = $"End: {_range.End:yyyy-MM-dd HH:mm:ss}";
+        if (!rebuildRows) return;
+        var rows = ProcessTrafficHistory.Summarize(_latestTransfers, _range.Start, _range.End);
         HistoryGrid.ItemsSource = rows.Select(row => new TransferDisplayRow(row)).ToArray();
+        HistoryEmptyText.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         RangeTotalsText.Text = $"Downloaded {ByteFormatting.FormatBytes(rows.Sum(row => row.DownloadBytes))}   ·   Uploaded {ByteFormatting.FormatBytes(rows.Sum(row => row.UploadBytes))}   ·   {rows.Count} applications";
     }
 
-    private void RangeCanvas_SizeChanged(object sender, SizeChangedEventArgs e) => RenderRange();
+    private void RangeCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_latestTransfers.Count > 0) DrawRangeSparkline();
+        RenderRange();
+    }
 
     private void StartThumb_DragDelta(object sender, DragDeltaEventArgs e)
     {
         if (_latestTransfers.Count == 0) return;
-        _followRecent = false;
-        _rangeStart = FromPosition(Math.Min(ToPosition(_rangeEnd), ToPosition(_rangeStart) + e.HorizontalChange));
+        _range.DragStart(e.HorizontalChange, RangeWidth);
         RenderRange();
     }
 
     private void EndThumb_DragDelta(object sender, DragDeltaEventArgs e)
     {
         if (_latestTransfers.Count == 0) return;
-        _followRecent = false;
-        _rangeEnd = FromPosition(Math.Max(ToPosition(_rangeStart), ToPosition(_rangeEnd) + e.HorizontalChange));
+        _range.DragEnd(e.HorizontalChange, RangeWidth);
         RenderRange();
     }
 
     private void RecentRange_Click(object sender, RoutedEventArgs e)
     {
-        _followRecent = true;
-        if (_latestTransfers.Count > 0)
-        {
-            _rangeStart = _newest - TimeSpan.FromMinutes(5);
-            if (_rangeStart < _oldest) _rangeStart = _oldest;
-            _rangeEnd = _newest;
-            RenderRange();
-        }
+        if (sender is Button { Tag: string minutes } && int.TryParse(minutes, out var value))
+            _range.Preset(TimeSpan.FromMinutes(value));
+        else _range.Preset(null);
+        RenderRange();
     }
 
     private async void RefreshBits_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button) return;
-        button.IsEnabled = false;
-        BitsStatusText.Text = "Reading BITS jobs...";
-        try
-        {
-            var jobs = (await BitsTransferReader.ReadAsync()).Concat(BrowserDownloadReader.Read()).ToArray();
-            BitsGrid.ItemsSource = jobs;
-            BitsStatusText.Text = jobs.Length == 0 ? "No active BITS jobs or browser partial files in Downloads." : $"{jobs.Length} transfer files found.";
-        }
-        catch (Exception error)
-        {
-            var browserFiles = BrowserDownloadReader.Read();
-            BitsGrid.ItemsSource = browserFiles;
-            BitsStatusText.Text = $"BITS unavailable ({error.Message}); {browserFiles.Count} browser partial files found.";
-        }
-        finally { button.IsEnabled = true; }
+        await RefreshDownloadsAsync();
+    }
+
+    private async Task RefreshDownloadsAsync()
+    {
+        if (_downloadsBusy) return;
+        _downloadsBusy = true;
+        _lastDownloadsRefresh = DateTime.Now;
+        RefreshDownloadsButton.IsEnabled = false;
+        BitsStatusText.Text = "Reading downloads...";
+        var jobs = new List<BitsTransfer>();
+        var errors = new List<string>();
+        try { jobs.AddRange(await BitsTransferReader.ReadAsync()); }
+        catch (Exception error) { errors.Add($"BITS: {error.Message}"); }
+        try { jobs.AddRange(await DeliveryOptimizationReader.ReadAsync()); }
+        catch (Exception error) { errors.Add($"DoSvc: {error.Message}"); }
+        jobs.AddRange(BrowserDownloadReader.Read());
+        BitsGrid.ItemsSource = jobs;
+        BitsEmptyText.Visibility = jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        BitsStatusText.Text = errors.Count > 0
+            ? $"{jobs.Count} files. {string.Join("; ", errors)}"
+            : $"{jobs.Count} transfer files · refreshed {DateTime.Now:HH:mm:ss}";
+        RefreshDownloadsButton.IsEnabled = true;
+        _downloadsBusy = false;
     }
 
     private void CheckBandwidthAlert(MonitorSnapshot snap)
@@ -292,6 +334,7 @@ public partial class MainWindow : Window
         if (_settings.BandwidthAlertThresholdMBps <= 0)
         {
             AlertText.Text = "";
+            AlertText.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -304,7 +347,10 @@ public partial class MainWindow : Window
         AlertText.Text = offender is null
             ? ""
             : $"⚠ {offender.ProcessName} is using {RateFormatting.FormatRate(offender.DownloadBytesPerSecond + offender.UploadBytesPerSecond)}";
+        AlertText.Visibility = offender is null ? Visibility.Collapsed : Visibility.Visible;
     }
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs e) => SettingsPopup.IsOpen = !SettingsPopup.IsOpen;
 
     private void TrackCheckBox_Checked(object sender, RoutedEventArgs e)
     {

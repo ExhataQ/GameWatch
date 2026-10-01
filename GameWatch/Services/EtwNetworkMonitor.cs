@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Linq;
 using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
@@ -28,6 +29,8 @@ public class EtwNetworkMonitor : IDisposable
     private TraceEventSession? _session;
     private Task? _processingTask;
     private readonly ConcurrentDictionary<int, ProcessByteCounters> _counters = new();
+    private readonly ConcurrentDictionary<int, string> _processNames = new();
+    private readonly ConcurrentDictionary<int, byte> _nameLookupAttempted = new();
 
     public bool IsRunning { get; private set; }
     public string? LastError { get; private set; }
@@ -87,6 +90,15 @@ public class EtwNetworkMonitor : IDisposable
 
     private void Add(int pid, long sent = 0, long received = 0)
     {
+        if (_nameLookupAttempted.TryAdd(pid, 0))
+        {
+            try
+            {
+                using var process = Process.GetProcessById(pid);
+                _processNames.TryAdd(pid, process.ProcessName);
+            }
+            catch { }
+        }
         var counters = _counters.GetOrAdd(pid, _ => new ProcessByteCounters());
         if (sent > 0) Interlocked.Add(ref counters.BytesSent, sent);
         if (received > 0) Interlocked.Add(ref counters.BytesReceived, received);
@@ -98,6 +110,8 @@ public class EtwNetworkMonitor : IDisposable
     {
         return _counters.ToDictionary(kv => kv.Key, kv => (kv.Value.BytesSent, kv.Value.BytesReceived));
     }
+
+    public bool TryGetProcessName(int pid, out string name) => _processNames.TryGetValue(pid, out name!);
 
     public void Stop()
     {

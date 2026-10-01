@@ -1,6 +1,9 @@
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 
 namespace GameWatch.Services;
+
+public record HostedService(string Name, string DisplayName, string ModulePath);
 
 public class ServiceProcessReader
 {
@@ -31,7 +34,28 @@ public class ServiceProcessReader
 
     public Dictionary<int, string> Read()
     {
-        var result = new Dictionary<int, List<string>>();
+        return ReadEntries().GroupBy(entry => entry.Pid).ToDictionary(group => group.Key,
+            group => string.Join(", ", group.Select(entry => entry.DisplayName).OrderBy(name => name)));
+    }
+
+    public IReadOnlyList<HostedService> ReadServicesForPid(int pid)
+    {
+        return ReadEntries().Where(entry => entry.Pid == pid).Select(entry =>
+        {
+            string module = "";
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{entry.Name}\Parameters");
+                module = Environment.ExpandEnvironmentVariables(key?.GetValue("ServiceDll") as string ?? "");
+            }
+            catch { }
+            return new HostedService(entry.Name, entry.DisplayName, module);
+        }).ToArray();
+    }
+
+    private static List<(int Pid, string Name, string DisplayName)> ReadEntries()
+    {
+        var result = new List<(int Pid, string Name, string DisplayName)>();
         var manager = OpenSCManager(null, null, 0x0004);
         if (manager == IntPtr.Zero) return new();
         try
@@ -53,10 +77,9 @@ public class ServiceProcessReader
                     {
                         var entry = Marshal.PtrToStructure<ServiceEntry>(IntPtr.Add(buffer, index * entrySize));
                         if (entry.Status.ProcessId == 0) continue;
-                        var name = Marshal.PtrToStringUni(entry.DisplayName) ?? Marshal.PtrToStringUni(entry.Name) ?? "Service";
-                        var pid = (int)entry.Status.ProcessId;
-                        if (!result.TryGetValue(pid, out var names)) result[pid] = names = new();
-                        names.Add(name);
+                        var name = Marshal.PtrToStringUni(entry.Name) ?? "";
+                        var display = Marshal.PtrToStringUni(entry.DisplayName) ?? name;
+                        result.Add(((int)entry.Status.ProcessId, name, display));
                     }
                     break;
                 }
@@ -64,6 +87,6 @@ public class ServiceProcessReader
             }
         }
         finally { CloseServiceHandle(manager); }
-        return result.ToDictionary(item => item.Key, item => string.Join(", ", item.Value.OrderBy(name => name)));
+        return result;
     }
 }

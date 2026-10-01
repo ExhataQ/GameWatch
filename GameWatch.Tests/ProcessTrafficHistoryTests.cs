@@ -34,4 +34,36 @@ public class ProcessTrafficHistoryTests
 
         Assert.Single(history.Snapshot());
     }
+
+    [Fact]
+    public void AFullDayCompactsToMinuteBucketsAndKeepsTotals()
+    {
+        var start = new DateTime(2026, 9, 29, 10, 0, 0);
+        var history = new ProcessTrafficHistory();
+        for (var index = 0; index < 43200; index++)
+            history.Add(new TrafficInterval(start.AddSeconds(index * 2), start.AddSeconds(index * 2 + 2),
+                new[] { new ProcessTransfer(1, "app", "app.exe", 2, 1) }));
+
+        var snapshot = history.Snapshot();
+        Assert.Same(snapshot, history.Snapshot());
+        Assert.InRange(snapshot.Count, 3150, 3300);
+        var totals = ProcessTrafficHistory.Summarize(snapshot, start.AddMinutes(1), start.AddHours(24));
+        Assert.Single(totals);
+        Assert.Equal(86340, totals[0].DownloadBytes);
+    }
+
+    [Fact]
+    public void ExistingSnapshotStaysImmutableAfterNewSamples()
+    {
+        var start = new DateTime(2026, 9, 30, 10, 0, 0);
+        var history = new ProcessTrafficHistory();
+        history.Add(new TrafficInterval(start, start.AddSeconds(2), Array.Empty<ProcessTransfer>()));
+        var previous = history.Snapshot();
+
+        history.Add(new TrafficInterval(start.AddSeconds(2), start.AddSeconds(4), Array.Empty<ProcessTransfer>()));
+
+        Assert.Single(previous);
+        Assert.Equal(2, history.Snapshot().Count);
+        Assert.NotSame(previous, history.Snapshot());
+    }
 }
